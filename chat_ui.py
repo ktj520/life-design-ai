@@ -86,8 +86,8 @@ SYSTEM_PROMPT = """
 """
 
 # ===== 保存先フォルダ =====
-DATA_DIR = r"C:\Users\克次\life-design-ai\client_data"
-SESSIONS_DIR = r"C:\Users\克次\life-design-ai\sessions"
+DATA_DIR = os.path.join(os.path.dirname(__file__), "client_data")
+SESSIONS_DIR = os.path.join(os.path.dirname(__file__), "sessions")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(SESSIONS_DIR, exist_ok=True)
 
