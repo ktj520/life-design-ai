@@ -85,46 +85,29 @@ SYSTEM_PROMPT = """
 - 日本語で対話する
 """
 
-# ページ設定
+# ===== 保存先フォルダ =====
+DATA_DIR = r"C:\Users\克次\life-design-ai\client_data"
+SESSIONS_DIR = r"C:\Users\克次\life-design-ai\sessions"
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(SESSIONS_DIR, exist_ok=True)
+
+# ===== ページ設定 =====
 st.set_page_config(
     page_title="ライフデザイン AI",
     page_icon="✨",
     layout="centered"
 )
 
-# 見た目のカスタマイズ
 st.markdown("""
 <style>
-    .stApp {
-        max-width: 600px;
-        margin: 0 auto;
-    }
-    .main-header {
-        text-align: center;
-        padding: 20px 0;
-        border-bottom: 2px solid #f0f0f0;
-        margin-bottom: 20px;
-    }
-    .main-header h1 {
-        font-size: 24px;
-        color: #333;
-    }
-    .main-header p {
-        color: #888;
-        font-size: 14px;
-    }
-    .complete-box {
-        background: #f0f9ff;
-        border: 2px solid #3b82f6;
-        border-radius: 12px;
-        padding: 20px;
-        text-align: center;
-        margin: 20px 0;
-    }
+    .stApp { max-width: 600px; margin: 0 auto; }
+    .main-header { text-align: center; padding: 20px 0; border-bottom: 2px solid #f0f0f0; margin-bottom: 20px; }
+    .main-header h1 { font-size: 24px; color: #333; }
+    .main-header p { color: #888; font-size: 14px; }
+    .complete-box { background: #f0f9ff; border: 2px solid #3b82f6; border-radius: 12px; padding: 20px; text-align: center; margin: 20px 0; }
 </style>
 """, unsafe_allow_html=True)
 
-# ヘッダー
 st.markdown("""
 <div class="main-header">
     <h1>✨ ライフデザイン AI</h1>
@@ -132,30 +115,52 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# APIクライアント
+# ===== APIクライアント =====
 client = anthropic.Anthropic(
     api_key=os.environ.get("ANTHROPIC_API_KEY")
 )
 
-# データ保存フォルダを作成
-DATA_DIR = "client_data"
-os.makedirs(DATA_DIR, exist_ok=True)
+# ===== セッション管理関数 =====
+def get_session_file(session_id):
+    return os.path.join(SESSIONS_DIR, f"{session_id}.json")
 
-def save_client_data(messages, summary_json):
+def save_session(session_id, messages, completed, summary):
+    data = {
+        "session_id": session_id,
+        "messages": messages,
+        "completed": completed,
+        "summary": summary,
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    with open(get_session_file(session_id), "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def load_session(session_id):
+    filepath = get_session_file(session_id)
+    if os.path.exists(filepath):
+        with open(filepath, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+def get_all_sessions():
+    sessions = []
+    for filename in os.listdir(SESSIONS_DIR):
+        if filename.endswith(".json"):
+            filepath = os.path.join(SESSIONS_DIR, filename)
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                sessions.append(data)
+    return sessions
+
+def save_client_data(messages, summary):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    if summary_json:
-        summary_file = os.path.join(DATA_DIR, f"summary_{timestamp}.json")
-        with open(summary_file, "w", encoding="utf-8") as f:
-            json.dump(summary_json, f, ensure_ascii=False, indent=2)
-    
-    log_file = os.path.join(DATA_DIR, f"conversation_{timestamp}.json")
-    with open(log_file, "w", encoding="utf-8") as f:
-        json.dump({
-            "timestamp": timestamp,
-            "messages": messages
-        }, f, ensure_ascii=False, indent=2)
-    
+    if summary:
+        filepath = os.path.join(DATA_DIR, f"summary_{timestamp}.json")
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+    filepath = os.path.join(DATA_DIR, f"conversation_{timestamp}.json")
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump({"timestamp": timestamp, "messages": messages}, f, ensure_ascii=False, indent=2)
     return timestamp
 
 def extract_summary(text):
@@ -174,12 +179,43 @@ def get_display_text(text):
         return text[:text.index("---SUMMARY_START---")].strip()
     return text
 
-# セッション初期化
-if "messages" not in st.session_state:
+# ===== サイドバー：セッション管理 =====
+st.sidebar.title("セッション管理")
+
+if st.sidebar.button("＋ 新しいクライアント"):
+    new_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    st.session_state.current_session = new_id
+    st.session_state.messages = []
+    st.session_state.completed = False
+    st.session_state.summary = None
+    st.rerun()
+
+# 過去のセッション一覧
+sessions = get_all_sessions()
+if sessions:
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**過去のセッション**")
+    for s in sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True):
+        name = "不明"
+        if s.get("summary") and s["summary"].get("client_name"):
+            name = s["summary"]["client_name"]
+        status = "✅" if s.get("completed") else "💬"
+        label = f"{status} {name} ({s.get('updated_at', '')[:10]})"
+        if st.sidebar.button(label, key=s["session_id"]):
+            st.session_state.current_session = s["session_id"]
+            st.session_state.messages = s["messages"]
+            st.session_state.completed = s.get("completed", False)
+            st.session_state.summary = s.get("summary")
+            st.rerun()
+
+# ===== セッション初期化 =====
+if "current_session" not in st.session_state:
+    st.session_state.current_session = datetime.now().strftime("%Y%m%d_%H%M%S")
     st.session_state.messages = []
     st.session_state.completed = False
     st.session_state.summary = None
 
+if len(st.session_state.messages) == 0 and not st.session_state.completed:
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=1024,
@@ -194,8 +230,14 @@ if "messages" not in st.session_state:
         "role": "assistant",
         "content": first_message
     })
+    save_session(
+        st.session_state.current_session,
+        st.session_state.messages,
+        False,
+        None
+    )
 
-# 会話履歴を表示
+# ===== 会話履歴を表示 =====
 for message in st.session_state.messages:
     display_text = get_display_text(message["content"])
     if message["role"] == "assistant":
@@ -205,7 +247,7 @@ for message in st.session_state.messages:
         with st.chat_message("user", avatar="😊"):
             st.write(display_text)
 
-# ヒアリング完了済みの場合
+# ===== ヒアリング完了済みの場合 =====
 if st.session_state.completed:
     st.markdown("""
     <div class="complete-box">
@@ -216,7 +258,11 @@ if st.session_state.completed:
     </div>
     """, unsafe_allow_html=True)
 
-# 未完了の場合は入力欄を表示
+    if st.session_state.summary:
+        with st.expander("ヒアリングサマリーを見る（FA向け）"):
+            st.json(st.session_state.summary)
+
+# ===== 未完了の場合は入力欄を表示 =====
 else:
     if user_input := st.chat_input("メッセージを入力してください"):
 
@@ -236,7 +282,6 @@ else:
                     messages=st.session_state.messages
                 )
                 assistant_message = response.content[0].text
-
                 display_text = get_display_text(assistant_message)
                 st.write(display_text)
 
@@ -245,11 +290,20 @@ else:
             "content": assistant_message
         })
 
-        # サマリーが含まれているかチェック
+        # サマリーチェック
         summary = extract_summary(assistant_message)
         if summary:
+            save_client_data(st.session_state.messages, summary)
             st.session_state.completed = True
             st.session_state.summary = summary
-            save_client_data(st.session_state.messages, summary)
-            st.rerun()
 
+        # セッションを保存（毎回）
+        save_session(
+            st.session_state.current_session,
+            st.session_state.messages,
+            st.session_state.completed,
+            st.session_state.summary
+        )
+
+        if summary:
+            st.rerun()
